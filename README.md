@@ -121,3 +121,19 @@ The included workflow `.github/workflows/scheduled_run.yml`:
 docker compose up -d
 ```
 Runs an initial scan on start and schedules subsequent scans every 6 hours via cron inside the container.
+
+---
+
+## 🎻 Multi-Model AI Orchestra
+
+A built-in multi-agent orchestration architecture utilizing:
+1. **Thinking Orchestrator (Lead / Planner)**: Uses a thinking model to formulate structured execution plans and decompose goals into independent tasks.
+2. **Flash Workers (Execution Units)**: Fast, parallel worker models carrying out base tasks concurrently with mandatory evidence tracing.
+3. **Deterministic Zero-Hallucination Gatekeeper**: A strict verification engine that extracts all factual claims (prices, dates, math calculations, cabin classes) and cross-validates them against raw ground-truth data, rejecting any ungrounded claim.
+4. **Quality Control (QC / Critic) Model**: An independent auditor model evaluating output against a strict quality rubric, returning `APPROVED` or triggering a self-healing repair loop with actionable feedback.
+
+### Run Orchestra Demo
+```bash
+python3 -m src.orchestra.cli --demo
+```
+
