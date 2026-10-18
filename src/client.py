@@ -370,9 +370,178 @@ class KiwiFlightClient(BaseFlightClient):
         return offers
 
 
+class AmadeusFlightClient(BaseFlightClient):
+    """Client for Amadeus for Developers API (https://developers.amadeus.com)."""
+
+    def __init__(self, client_id: Optional[str] = None, client_secret: Optional[str] = None):
+        self.client_id = client_id or os.getenv("AMADEUS_CLIENT_ID", "")
+        self.client_secret = client_secret or os.getenv("AMADEUS_CLIENT_SECRET", "")
+        self.token: Optional[str] = None
+        self.token_expiry: float = 0.0
+
+    def _get_access_token(self) -> Optional[str]:
+        import json
+        import time
+        import urllib.parse
+        import urllib.request
+
+        if self.token and time.time() < self.token_expiry:
+            return self.token
+
+        if not self.client_id or not self.client_secret:
+            return None
+
+        url = "https://test.api.amadeus.com/v1/security/oauth2/token"
+        data = urllib.parse.urlencode({
+            "grant_type": "client_credentials",
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+        }).encode("utf-8")
+
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/x-www-form-urlencoded"})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                res = json.loads(resp.read().decode("utf-8"))
+                self.token = res.get("access_token")
+                expires_in = res.get("expires_in", 1799)
+                self.token_expiry = time.time() + expires_in - 60
+                return self.token
+        except Exception as e:
+            print(f"[Amadeus] Token authentication error: {e}")
+            return None
+
+    def fetch_offers(
+        self,
+        origin: str,
+        destination: str,
+        cabin: CabinClass,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> List[FlightOffer]:
+        token = self._get_access_token()
+        if not token:
+            return []
+
+        import json
+        import urllib.parse
+        import urllib.request
+
+        rule = DESTINATION_RULES.get(destination)
+        if not rule:
+            return []
+
+        # Target date in upcoming seasonal month
+        today = date.today()
+        target_year = today.year
+        valid_months = sorted(list(rule.seasonal_months))
+        dep_month = valid_months[0]
+        if dep_month < today.month:
+            target_year += 1
+        dep_date = start_date or date(target_year, dep_month, 10)
+        ret_date = end_date or (dep_date + timedelta(days=rule.min_stay_nights + 1))
+
+        # Destination city code or main airport
+        dest_code = list(rule.airport_codes)[0] if destination == "NYC" else destination
+
+        travel_class_map = {
+            CabinClass.ECONOMY: "ECONOMY",
+            CabinClass.PREMIUM_ECONOMY: "PREMIUM_ECONOMY",
+            CabinClass.BUSINESS: "BUSINESS",
+        }
+
+        url = "https://test.api.amadeus.com/v2/shopping/flight-offers"
+        params = {
+            "originLocationCode": origin,
+            "destinationLocationCode": dest_code,
+            "departureDate": dep_date.strftime("%Y-%m-%d"),
+            "returnDate": ret_date.strftime("%Y-%m-%d"),
+            "adults": 1,
+            "travelClass": travel_class_map.get(cabin, "ECONOMY"),
+            "nonStop": "true" if rule.max_stops == 0 else "false",
+            "currencyCode": "CZK",
+            "max": 10,
+        }
+
+        req = urllib.request.Request(
+            f"{url}?{urllib.parse.urlencode(params)}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        offers: List[FlightOffer] = []
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                for idx, item in enumerate(data.get("data", [])):
+                    itins = item.get("itineraries", [])
+                    if len(itins) < 2:
+                        continue
+
+                    # Parse Outbound Leg
+                    out_segs = []
+                    for s in itins[0].get("segments", []):
+                        dep_dt = datetime.fromisoformat(s["departure"]["at"])
+                        arr_dt = datetime.fromisoformat(s["arrival"]["at"])
+                        out_segs.append(
+                            FlightSegment(
+                                departure_airport=s["departure"]["iataCode"],
+                                arrival_airport=s["arrival"]["iataCode"],
+                                departure_time=dep_dt,
+                                arrival_time=arr_dt,
+                                airline_code=s["carrierCode"],
+                                airline_name=s["carrierCode"],
+                                flight_number=f"{s['carrierCode']}{s['number']}",
+                                cabin_class=cabin,
+                            )
+                        )
+
+                    # Parse Return Leg
+                    ret_segs = []
+                    for s in itins[1].get("segments", []):
+                        dep_dt = datetime.fromisoformat(s["departure"]["at"])
+                        arr_dt = datetime.fromisoformat(s["arrival"]["at"])
+                        ret_segs.append(
+                            FlightSegment(
+                                departure_airport=s["departure"]["iataCode"],
+                                arrival_airport=s["arrival"]["iataCode"],
+                                departure_time=dep_dt,
+                                arrival_time=arr_dt,
+                                airline_code=s["carrierCode"],
+                                airline_name=s["carrierCode"],
+                                flight_number=f"{s['carrierCode']}{s['number']}",
+                                cabin_class=cabin,
+                            )
+                        )
+
+                    total_price = float(item.get("price", {}).get("total", 0.0))
+                    offers.append(
+                        FlightOffer(
+                            id=f"AMADEUS-{item.get('id', idx)}",
+                            origin=origin,
+                            destination=destination,
+                            outbound_leg=FlightLeg(out_segs),
+                            return_leg=FlightLeg(ret_segs),
+                            price_czk=total_price,
+                            cabin_class=cabin,
+                            google_flights_url=build_google_flights_url(origin, destination, dep_date, ret_date, cabin, rule.max_stops),
+                            skyscanner_url=build_skyscanner_url(origin, destination, dep_date, ret_date, cabin),
+                        )
+                    )
+        except Exception as e:
+            print(f"[Amadeus] Search error: {e}")
+            return []
+
+        return offers
+
+
 def get_flight_client() -> BaseFlightClient:
-    """Return live Kiwi client if API key configured, otherwise high-fidelity Mock client."""
+    """Return live Amadeus or Kiwi client if configured, otherwise high-fidelity Mock client."""
+    amadeus_id = os.getenv("AMADEUS_CLIENT_ID")
+    amadeus_sec = os.getenv("AMADEUS_CLIENT_SECRET")
+    if amadeus_id and amadeus_sec and amadeus_id.strip() and amadeus_sec.strip():
+        return AmadeusFlightClient(client_id=amadeus_id.strip(), client_secret=amadeus_sec.strip())
+
     kiwi_key = os.getenv("KIWI_API_KEY")
     if kiwi_key and kiwi_key.strip():
         return KiwiFlightClient(api_key=kiwi_key.strip())
+
     return MockFlightClient()
