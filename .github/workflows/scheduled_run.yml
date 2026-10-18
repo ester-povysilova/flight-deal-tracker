@@ -1,0 +1,83 @@
+name: Scheduled Flight Deals Tracker
+
+on:
+  schedule:
+    # Run every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (do not dispatch SMTP email)'
+        required: false
+        default: false
+        type: boolean
+      force_email:
+        description: 'Force email dispatch (bypass 48h cooldown)'
+        required: false
+        default: false
+        type: boolean
+      sample_data:
+        description: 'Run with mock fixture sample data'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  track-deals:
+    name: Scan Flight Deals & Alert
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run Unit Tests
+        run: |
+          python -m unittest discover -s tests -v
+
+      - name: Restore Deal State Cache
+        uses: actions/cache@v4
+        with:
+          path: data/deal_history.json
+          key: flight-deals-state-${{ github.run_id }}
+          restore-keys: |
+            flight-deals-state-
+
+      - name: Execute Deal Tracker
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          KIWI_API_KEY: ${{ secrets.KIWI_API_KEY }}
+        run: |
+          FLAGS=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then FLAGS="$FLAGS --dry-run"; fi
+          if [ "${{ github.event.inputs.force_email }}" = "true" ]; then FLAGS="$FLAGS --force-email"; fi
+          if [ "${{ github.event.inputs.sample_data }}" = "true" ]; then FLAGS="$FLAGS --sample-data"; fi
+
+          # If secrets not provided, run in safe dry-run mode
+          if [ -z "$GMAIL_USER" ] || [ -z "$GMAIL_APP_PASSWORD" ]; then
+            echo "::notice::Gmail credentials not found in secrets; running in dry-run mode."
+            FLAGS="$FLAGS --dry-run"
+          fi
+
+          python -m src.tracker $FLAGS
+
+      - name: Upload HTML Preview Artifact (if created)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: email-digest-preview
+          path: artifacts/email_preview.html
+          if-no-files-found: ignore

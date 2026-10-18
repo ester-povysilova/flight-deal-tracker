@@ -1,0 +1,1 @@
+"""Flight Deal Tracker package."""

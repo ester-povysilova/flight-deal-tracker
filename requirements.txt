@@ -1,0 +1,3 @@
+# Core flight deal tracker is built on Python 3.12+ standard library
+# Optional testing framework
+pytest>=8.0.0
