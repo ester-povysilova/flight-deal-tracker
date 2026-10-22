@@ -1,3 +1,6 @@
-# Core flight deal tracker is built on Python 3.12+ standard library
-# Optional testing framework
+# Core flight deal tracker dependencies
 pytest>=8.0.0
+fast-flights>=3.1.0
+primp>=2.0.1
+selectolax>=1.0.2
+

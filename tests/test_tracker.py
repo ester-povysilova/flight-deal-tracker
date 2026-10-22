@@ -523,5 +523,23 @@ class TestFullTrackerIntegration(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+class TestGoogleFlightsClient(unittest.TestCase):
+    """Tests for live GoogleFlightsClient and client resolution."""
+
+    def test_get_flight_client_resolution(self):
+        """get_flight_client returns GoogleFlightsClient or MockFlightClient based on env."""
+        from src.client import GoogleFlightsClient, MockFlightClient, get_flight_client
+
+        # FORCE_MOCK returns MockFlightClient
+        os.environ["FORCE_MOCK"] = "1"
+        client = get_flight_client()
+        self.assertIsInstance(client, MockFlightClient)
+
+        del os.environ["FORCE_MOCK"]
+        client = get_flight_client()
+        self.assertIsInstance(client, (GoogleFlightsClient, MockFlightClient))
+
+
 if __name__ == "__main__":
     unittest.main()
+
