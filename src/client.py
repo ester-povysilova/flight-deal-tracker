@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+import json
 import os
 import urllib.parse
 from datetime import date, datetime, timedelta
@@ -638,10 +639,10 @@ class GoogleFlightsClient(BaseFlightClient):
                 out_segs: List[FlightSegment] = []
 
                 for s in f[0][2]:
-                    dh = s[8][0] if len(s[8]) > 0 else 0
-                    dm = s[8][1] if len(s[8]) > 1 else 0
-                    ah = s[10][0] if len(s[10]) > 0 else 0
-                    am = s[10][1] if len(s[10]) > 1 else 0
+                    dh = s[8][0] if (len(s[8]) > 0 and s[8][0] is not None) else 0
+                    dm = s[8][1] if (len(s[8]) > 1 and s[8][1] is not None) else 0
+                    ah = s[10][0] if (len(s[10]) > 0 and s[10][0] is not None) else 0
+                    am = s[10][1] if (len(s[10]) > 1 and s[10][1] is not None) else 0
                     s_dep = datetime(s[20][0], s[20][1], s[20][2], dh, dm)
                     s_arr = datetime(s[21][0], s[21][1], s[21][2], ah, am)
                     c_code = s[22][0] if len(s) > 22 and s[22] and len(s[22]) > 0 else "XX"
